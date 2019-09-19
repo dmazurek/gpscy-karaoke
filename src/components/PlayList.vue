@@ -15,7 +15,12 @@
         <div class="flex-cell scrollbar-placeholder"></div>
       </div>
     </div>
-    <div class="flex-body">
+    <div class="flex-body" v-if="loading">
+      <div class="loading">
+        <icon name="spinner" pulse></icon><span>Loading...</span>
+      </div>
+    </div>
+    <div class="flex-body" v-if="!loading">
       <div class="flex-row" v-for="song in sortedPlaylist">
         <div class="flex-cell" v-for="column in columns">
           {{song[column.value]}}
@@ -30,6 +35,7 @@
   import _ from 'lodash'
   import 'vue-awesome/icons/caret-down'
   import 'vue-awesome/icons/caret-up'
+  import 'vue-awesome/icons/spinner'
   import Icon from 'vue-awesome/components/Icon.vue'
 
   export default {
@@ -39,6 +45,7 @@
     },
     data () {
       return {
+        loading: true,
         playlist: null,
         error: null,
         columns: [{
@@ -59,16 +66,20 @@
       }
     },
     created: function () {
-      axios.get('/api/playlist')
+      this.loading = true
+      axios.get('/karaoke/api/playlist')
         .then((response) => {
           this.playlist = response.data
+          this.loading = false
         })
         .catch((error) => {
           this.error = error
+          this.loading = false
         })
     },
     computed: {
       sortedPlaylist () {
+        this.loading = true
         const filtered = _.filter(this.playlist, song => {
           if (this.filter.arts) {
             if (song.arts.toLowerCase().indexOf(this.filter.arts.toLowerCase()) < 0) {
@@ -83,18 +94,29 @@
           return true
         })
 
-        const key = this.sort.arts ? 'arts' : 'name'
-        const ordered = _.orderBy(filtered, filtered => filtered[key].toLowerCase().replace(/[^\w\s]|_/g, ''), [this.sort[key]])
+        const keys = this.sort.arts ? ['arts', 'name'] : ['name', 'arts']
+        const ordered = _.orderBy(filtered, [ filtered => filtered[keys[0]].toLowerCase().replace(/[^\w\s]|_/g, ''),
+          filtered => filtered[keys[1]].toLowerCase().replace(/[^\w\s]|_/g, ''), [this.sort[keys[0]]], this.sort[keys[1]]])
 
-        setTimeout(() => {
-          const flexTable = document.getElementsByClassName('flex-table')[0]
-          const flexBody = document.getElementsByClassName('flex-body')[0]
-          if (flexTable.scrollHeight > flexBody.scrollHeight) {
-            flexBody.style.borderRight = '15px solid gray'
-          } else {
-            flexBody.style.borderRight = ''
+        this.$nextTick(function () {
+          // Fix alignment and padding due to the scrollbar. Chrome seems to be the only
+          // browser (on Windows at least) that respects flex headers. The others scroll
+          // the whole page. Need to test on Safari though.
+          if (/Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor)) {
+            var scrollBarWidth = getScrollBarWidth()
+            const flexTable = document.getElementsByClassName('flex-table')[0]
+            const flexBody = document.getElementsByClassName('flex-body')[0]
+            if (flexTable.scrollHeight < flexBody.scrollHeight) {
+              // we have a scrollbar
+              fixScrollBarWidth(scrollBarWidth)
+              flexBody.style.borderRight = ''
+            } else {
+              // we don't have a scrollbar, fill in the space with a placeholder/border
+              flexBody.style.borderRight = `${scrollBarWidth}px solid gray`
+            }
           }
-        }, 0)
+        })
+
         return ordered
       },
       sortIcons () {
@@ -110,6 +132,45 @@
           [column.value]: this.sort[column.value] === 'asc' ? 'desc' : 'asc'
         }
       }
+    },
+    watch: {
+      sortedPlaylist (newSortedPlaylist) {
+        this.loading = false
+      }
+    }
+  }
+
+  function getScrollBarWidth () {
+    console.log('setting the scrollbar width')
+    var inner = document.createElement('p')
+    inner.style.width = '100%'
+    inner.style.height = '200px'
+
+    var outer = document.createElement('div')
+    outer.style.position = 'absolute'
+    outer.style.top = '0px'
+    outer.style.left = '0px'
+    outer.style.visibility = 'hidden'
+    outer.style.width = '200px'
+    outer.style.height = '150px'
+    outer.style.overflow = 'hidden'
+    outer.appendChild(inner)
+
+    document.body.appendChild(outer)
+    var w1 = inner.offsetWidth
+    outer.style.overflow = 'scroll'
+    var w2 = inner.offsetWidth
+    if (w1 === w2) w2 = outer.clientWidth
+
+    document.body.removeChild(outer)
+
+    return w1 - w2
+  }
+
+  function fixScrollBarWidth (pixels) {
+    var placeholders = document.getElementsByClassName('scrollbar-placeholder')
+    for (var placeholder of placeholders) {
+      placeholder.style.width = `${pixels}px`
     }
   }
 </script>
@@ -157,9 +218,7 @@
           cursor: pointer;
 
           &.scrollbar-placeholder {
-            @media @mobile,@highdensity { width: 0px; }
-            @media @chrome { width: 16px; }
-            width: 14px;
+            width: 0;
             flex: 0 0 auto;
             background-color: @borderColor;
             cursor: default;
@@ -195,6 +254,17 @@
         &.scrollbar-placeholder {
           padding: 0;
         }
+      }
+    }
+
+    .loading {
+      display:flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+
+      .fa-icon {
+        margin-right: 10px;
       }
     }
   }
